@@ -1,6 +1,7 @@
 /**
- * Types related to CSGOFloat Market
+ * Types related to CSFloat Market
  */
+import {TradeOfferState} from './steam_constants';
 
 export interface Item {
     asset_id: string;
@@ -80,6 +81,12 @@ export enum TradeState {
     CANCELLED = 'cancelled',
 }
 
+export interface SteamOffer {
+    id: string;
+    state: TradeOfferState;
+    sent_at: string;
+}
+
 export interface Trade {
     id: string;
     accepted_at?: string;
@@ -95,4 +102,6 @@ export interface Trade {
     seller_id: string;
     state: TradeState;
     trade_url: string;
+    steam_offer: SteamOffer;
+    wait_for_cancel_ping?: boolean;
 }

@@ -1,4 +1,4 @@
-import {html, nothing} from 'lit';
+import {css, html, nothing, TemplateResult} from 'lit';
 
 import {state} from 'lit/decorators.js';
 import {CustomElement, InjectAppend, InjectionMode} from '../injectors';
@@ -7,16 +7,27 @@ import {cache} from 'decorator-cache-getter';
 import {rgAsset, ListingData} from '../../types/steam';
 import {gFloatFetcher} from '../../services/float_fetcher';
 import {ItemInfo} from '../../bridge/handlers/fetch_inspect_info';
-import {getMarketInspectLink, inlineEasyInspect, inlineStickers} from './helpers';
-import {formatSeed, getFadePercentage, isSkin, renderClickableRank, floor} from '../../utils/skin';
+import {getMarketInspectLink, inlineEasyInspect, inlineStickersAndKeychains} from './helpers';
+import {formatSeed, getFadePercentage, isSkin, renderClickableRank, floor, isCharm} from '../../utils/skin';
 import {gFilterService} from '../../services/filter';
 import {AppId, ContextId, Currency} from '../../types/steam_constants';
 import {defined} from '../../utils/checkers';
 import {pickTextColour} from '../../utils/colours';
+import '../common/ui/floatbar';
 
 @CustomElement()
 @InjectAppend('#searchResultsRows .market_listing_row .market_listing_item_name_block', InjectionMode.CONTINUOUS)
 export class ItemRowWrapper extends FloatElement {
+    static styles = [
+        ...FloatElement.styles,
+        css`
+            .float-row-wrapper {
+                display: inline-block;
+                margin-bottom: 5px;
+            }
+        `,
+    ];
+
     @cache
     get listingId(): string | undefined {
         const id = $J(this).parent().find('.market_listing_item_name').attr('id');
@@ -103,7 +114,7 @@ export class ItemRowWrapper extends FloatElement {
         }
 
         if (this.itemInfo && this.asset) {
-            inlineStickers(
+            inlineStickersAndKeychains(
                 $J(this).parent().parent().find('.market_listing_item_name_block'),
                 this.itemInfo,
                 this.asset
@@ -129,6 +140,13 @@ export class ItemRowWrapper extends FloatElement {
             // dialogs opening.
             MarketCheckHash();
         }
+
+        // Make sure the parent containers can overflow
+        const parentContainer = $J(this).parent();
+        if (parentContainer) {
+            parentContainer.css('overflow', 'visible');
+            parentContainer.parent().css('overflow', 'visible');
+        }
     }
 
     render() {
@@ -136,16 +154,23 @@ export class ItemRowWrapper extends FloatElement {
             return html``;
         }
 
-        if (this.asset && !isSkin(this.asset)) {
+        if (!this.asset) {
             return nothing;
         }
 
-        if (this.itemInfo) {
+        if (this.asset && !isSkin(this.asset) && !isCharm(this.asset)) {
+            return nothing;
+        }
+
+        if (this.itemInfo && isSkin(this.asset)) {
             const fadePercentage = this.asset && getFadePercentage(this.asset, this.itemInfo);
 
             return html`
-                <div>
-                    Float: ${this.itemInfo.floatvalue.toFixed(14)} ${renderClickableRank(this.itemInfo)}<br />
+                <div class="float-row-wrapper">
+                    ${this.renderFloatBar()}
+                    <span style="display: block;">
+                        Float: ${this.itemInfo.floatvalue.toFixed(14)} ${renderClickableRank(this.itemInfo)}
+                    </span>
                     Paint Seed:
                     ${formatSeed(this.itemInfo)}${fadePercentage !== undefined
                         ? html`<br />
@@ -153,10 +178,31 @@ export class ItemRowWrapper extends FloatElement {
                         : nothing}
                 </div>
             `;
+        } else if (this.itemInfo && isCharm(this.asset)) {
+            return html`
+                <div class="float-row-wrapper">
+                    Pattern: #${this.itemInfo.keychains?.length > 0 ? this.itemInfo.keychains[0].pattern : 'Unknown'}
+                </div>
+            `;
         } else if (this.error) {
-            return html`<div style="color: orangered">CSGOFloat ${this.error}</div>`;
+            return html`<div style="color: orangered">CSFloat ${this.error}</div>`;
         } else {
             return html`<div>Loading...</div>`;
         }
+    }
+
+    renderFloatBar(): TemplateResult<1> {
+        if (!this.itemInfo) {
+            return html``;
+        }
+
+        return html`
+            <csfloat-float-bar
+                float=${this.itemInfo.floatvalue}
+                minFloat=${this.itemInfo.min}
+                maxFloat=${this.itemInfo.max}
+            >
+            </csfloat-float-bar>
+        `;
     }
 }

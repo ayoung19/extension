@@ -8,13 +8,21 @@ import {state} from 'lit/decorators.js';
 import {Observe} from '../../utils/observers';
 
 import '../common/ui/steam-button';
-import {AppId, ContextId} from '../../types/steam_constants';
+import {AppId, ContextId, TradeOfferState} from '../../types/steam_constants';
+import {HasPermissions} from '../../bridge/handlers/has_permissions';
+import {hasQueryParameter} from '../../utils/browser';
 
 @CustomElement()
 @InjectBefore('div.trade_area')
 export class AutoFill extends FloatElement {
     @state()
     private pendingTradesResponse: FetchPendingTradesResponse | undefined;
+
+    @state()
+    private pendingTradesFailureReason: string | undefined;
+
+    @state()
+    private hasPermissions = false;
 
     static styles = [
         ...FloatElement.styles,
@@ -23,19 +31,37 @@ export class AutoFill extends FloatElement {
                 margin-top: 10px;
                 margin-bottom: 10px;
                 padding: 15px;
-                background-color: rgb(48, 48, 48);
+                background-color: #15171c;
                 color: white;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                border-radius: 6px;
             }
 
             .container.warning {
                 background-color: rgb(179, 0, 0);
             }
 
+            .notice {
+                background-color: #6775e1;
+                padding: 6px;
+                border-radius: 6px;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                margin-top: 10px;
+                margin-bottom: 10px;
+                font-size: 15px;
+                color: white;
+            }
+
             .float-icon {
                 float: left;
+            }
+
+            .float-icon > img {
+                border-radius: 5px;
             }
 
             .item-name {
@@ -55,12 +81,23 @@ export class AutoFill extends FloatElement {
         super.connectedCallback();
 
         try {
-            this.pendingTradesResponse = await ClientSend(FetchPendingTrades, {});
+            const hasPermissions = await ClientSend(HasPermissions, {
+                permissions: ['alarms'],
+                origins: ['*://*.steampowered.com/*'],
+            });
+            this.hasPermissions = hasPermissions.granted;
+        } catch (e) {
+            console.error('failed to check permissions', e);
+        }
+
+        try {
+            this.pendingTradesResponse = await ClientSend(FetchPendingTrades, {limit: 1000});
         } catch (e: any) {
             console.error(
-                'failed to fetch pending trades on CSGOFloat Market, they are likely not logged in.',
+                'failed to fetch pending trades on CSFloat Market, they are likely not logged in.',
                 e.toString()
             );
+            this.pendingTradesFailureReason = e.toString();
         }
 
         Observe(
@@ -74,7 +111,16 @@ export class AutoFill extends FloatElement {
 
     renderAutoFillDialog(trade: Trade): HTMLTemplateResult {
         if (trade.state !== TradeState.PENDING) {
-            // Make sure they accepted the sale on CSGOFloat first
+            // Make sure they accepted the sale on CSFloat first
+            return html``;
+        }
+
+        if (
+            [TradeOfferState.Active, TradeOfferState.Accepted, TradeOfferState.CreatedNeedsConfirmation].includes(
+                trade.steam_offer?.state
+            )
+        ) {
+            // Already had a trade offer created
             return html``;
         }
 
@@ -90,17 +136,65 @@ export class AutoFill extends FloatElement {
                 <div>
                     <div class="float-icon">
                         <img
-                            src="https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/79/798a12316637ad8fbb91ddb7dc63f770b680bd19_full.jpg"
+                            src="https://avatars.cloudflare.steamstatic.com/6ab5219d0bbcce1300a2c6d7cbc638da52edda48_full.jpg"
                             style="height: 32px;"
                         />
                     </div>
                     <span class="item-name"> ${item.market_hash_name} </span>
                     ${this.getSaleInfo(item)}
                 </div>
-                <csgofloat-steam-button
+                <csfloat-steam-button
                     .text="${'Auto-Fill'}"
                     @click="${() => this.autoFill(trade)}"
-                ></csgofloat-steam-button>
+                ></csfloat-steam-button>
+            </div>
+        `;
+    }
+
+    renderBulkAutoFillDialog(rawTrades: Trade[]): HTMLTemplateResult {
+        // Remove items already included and non-pending
+        const fTrades = rawTrades
+            .filter(
+                (trade) => !g_rgCurrentTradeStatus.me.assets.find((a) => a.assetid === trade.contract.item.asset_id)
+            )
+            .filter((trade) => trade.state === TradeState.PENDING)
+            .filter((trade) => {
+                if (!trade.steam_offer?.id) {
+                    // Trade offer hasn't been created yet
+                    return true;
+                }
+
+                // Only include trades with previous "non-active" trade offers
+                return ![
+                    TradeOfferState.Active,
+                    TradeOfferState.Accepted,
+                    TradeOfferState.CreatedNeedsConfirmation,
+                ].includes(trade.steam_offer?.state);
+            });
+
+        // Bulk implies > 1
+        if (fTrades.length <= 1) {
+            return html``;
+        }
+
+        const totalValue = fTrades.map((e) => e.contract.price).reduce((acc, e) => acc + e, 0);
+
+        return html`
+            <div class="container" style="margin: 20px 0 20px 0;">
+                <div>
+                    <div class="float-icon">
+                        <img
+                            src="https://avatars.cloudflare.steamstatic.com/6ab5219d0bbcce1300a2c6d7cbc638da52edda48_full.jpg"
+                            style="height: 32px;"
+                        />
+                    </div>
+                    <span class="item-name"> Detected ${fTrades.length} Sales </span>
+                    <div class="sale-info">Total Value: $${(totalValue / 100).toFixed(2)}</div>
+                </div>
+                <csfloat-steam-button
+                    .text="${'Auto-Fill All Items'}"
+                    @click="${() => this.autoFillAll(fTrades)}"
+                ></csfloat-steam-button>
             </div>
         `;
     }
@@ -118,9 +212,9 @@ export class AutoFill extends FloatElement {
     }
 
     /**
-     * Show a warning to users if trade includes item with csgofloat note that doesn't match an existing sale
+     * Show a warning to users if trade includes item with csfloat note that doesn't match an existing sale
      *
-     * Tries to prevent scenarios where malicious actors send offer with CSGOFloat text requesting an item
+     * Tries to prevent scenarios where malicious actors send offer with CSFloat text requesting an item
      */
     showWarningDialog(): HTMLTemplateResult {
         if (!this.hasAutoFillText()) {
@@ -128,7 +222,7 @@ export class AutoFill extends FloatElement {
         }
 
         const hasItemWithNoSale = g_rgCurrentTradeStatus.me.assets.find(
-            (a) => !this.pendingTradesResponse?.trades_to_send.find((b) => b.contract.item.asset_id === a.assetid)
+            (a) => !this.pendingTradesResponse?.trades.find((b) => b.contract.item.asset_id === a.assetid)
         );
 
         if (!hasItemWithNoSale) {
@@ -140,13 +234,13 @@ export class AutoFill extends FloatElement {
                 <div>
                     <div class="float-icon">
                         <img
-                            src="https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/79/798a12316637ad8fbb91ddb7dc63f770b680bd19_full.jpg"
+                            src="https://avatars.cloudflare.steamstatic.com/6ab5219d0bbcce1300a2c6d7cbc638da52edda48_full.jpg"
                             style="height: 32px;"
                         />
                     </div>
                     <span class="item-name"> Warning! </span>
                     <div class="sale-info">
-                        Some of the items in the offer were not purchased from you on CSGOFloat Market (or you're logged
+                        Some of the items in the offer were not purchased from you on CSFloat Market (or you're logged
                         into the wrong account)
                     </div>
                 </div>
@@ -154,22 +248,138 @@ export class AutoFill extends FloatElement {
         `;
     }
 
-    protected render(): HTMLTemplateResult {
-        if (!this.pendingTradesResponse) return html``;
+    showPermissionWarningDialog(tradesToBuyer: Trade[]): HTMLTemplateResult {
+        if (this.hasPermissions || tradesToBuyer.length === 0) {
+            return html``;
+        }
 
         return html`
-            ${this.pendingTradesResponse.trades_to_send
-                .filter((e) => e.buyer_id === UserThem?.strSteamId)
-                .map((e) => this.renderAutoFillDialog(e))}
+            <div class="container warning">
+                <div>
+                    <div class="float-icon">
+                        <img
+                            src="https://avatars.cloudflare.steamstatic.com/6ab5219d0bbcce1300a2c6d7cbc638da52edda48_full.jpg"
+                            style="height: 32px;"
+                        />
+                    </div>
+                    <span class="item-name"> Warning! </span>
+                    <div class="sale-info">
+                        You have not setup trade verification for CSFloat, you must enable it on your
+                        <a href="https://steamcommunity.com/id/me/tradeoffers/" target="_blank">Trade Offers page</a>!
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    showExpectedAutoFillFailWarning(): HTMLTemplateResult {
+        if (!this.pendingTradesFailureReason || !hasQueryParameter('autofill')) {
+            // Loaded correctly or not applicable (no custom auto fill query param)
+            return html``;
+        }
+
+        return html`
+            <div class="container warning">
+                <div>
+                    <div class="float-icon">
+                        <img
+                            src="https://avatars.cloudflare.steamstatic.com/6ab5219d0bbcce1300a2c6d7cbc638da52edda48_full.jpg"
+                            style="height: 32px;"
+                        />
+                    </div>
+                    <span class="item-name"> Warning! </span>
+                    <div class="sale-info">
+                        Your CSFloat extension isn't properly able to fetch pending sales, DO NOT send items manually.
+                        Make sure you're logged into CSFloat!
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    showAutoFillInfoDialog(tradesToBuyer: Trade[]): HTMLTemplateResult {
+        if (tradesToBuyer.length === 0) {
+            return html``;
+        }
+
+        return html`
+            <div class="notice">
+                <img
+                    src="https://avatars.cloudflare.steamstatic.com/6ab5219d0bbcce1300a2c6d7cbc638da52edda48_full.jpg"
+                    style="height: 32px; border-radius: 5px;"
+                />
+                <div>You must use auto-fill in order to send trades on CSFloat Market.</div>
+            </div>
+        `;
+    }
+
+    protected render(): HTMLTemplateResult {
+        if (!this.pendingTradesResponse) {
+            // Check if we expected to be able to auto-fill, if so -- show a warning
+            if (hasQueryParameter('autofill')) {
+                this.disableInventoryPicker();
+                return this.showExpectedAutoFillFailWarning();
+            }
+
+            return html``;
+        }
+
+        const tradesToBuyer = this.pendingTradesResponse.trades.filter((e) => e.buyer_id === UserThem?.strSteamId);
+
+        const tradesWithoutOffersToBuyer = tradesToBuyer.filter(
+            (e) => !e.steam_offer?.state || !e.steam_offer?.id || ![2, 3].includes(e.steam_offer?.state) // 2, 3 correspond to "active" and "accepted" trade offers
+        );
+        if (tradesWithoutOffersToBuyer.length > 0 || hasQueryParameter('autofill')) {
+            // Disable them being able to select random items from their inventory (ensure asset IDs match up)
+            this.disableInventoryPicker();
+        }
+
+        if (tradesToBuyer.length > 0 && g_ActiveInventory?.appid !== AppId.CSGO) {
+            // Default to CS inventory
+            try {
+                ShowItemInventory(AppId.CSGO, ContextId.PRIMARY);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        return html`
+            ${this.showAutoFillInfoDialog(tradesToBuyer)} ${this.showPermissionWarningDialog(tradesToBuyer)}
+            ${this.renderBulkAutoFillDialog(tradesToBuyer)} ${tradesToBuyer.map((e) => this.renderAutoFillDialog(e))}
             ${this.showWarningDialog()}
         `;
+    }
+
+    disableInventoryPicker() {
+        if (!g_steamID) {
+            return;
+        }
+
+        const elem = document.getElementById('inventories');
+        if (!elem) {
+            return;
+        }
+
+        // @ts-ignore
+        elem.style.opacity = '0.5';
+
+        // @ts-ignore
+        elem.style.pointerEvents = 'none';
+    }
+
+    autoFillAll(trades: Trade[]) {
+        for (const trade of trades) {
+            this.autoFill(trade);
+        }
     }
 
     autoFill(trade: Trade) {
         $J('#inventory_select_your_inventory').click();
         const el = UserYou?.findAsset(AppId.CSGO, ContextId.PRIMARY, trade.contract.item.asset_id)?.element;
         if (!el) {
-            console.error('failed to find asset element for id ' + trade.contract.item.asset_id);
+            alert(
+                `Failed to auto-fill asset ${trade.contract.item.asset_id}, you may have traded it away -- DO NOT SEND IT MANUALLY!`
+            );
             return;
         }
 
@@ -179,7 +389,7 @@ export class AutoFill extends FloatElement {
         if (note) {
             (
                 note as HTMLTextAreaElement
-            ).value = `CSGOFloat Market Trade Offer #${trade.id} \n\nThanks for using CSGOFloat!`;
+            ).value = `CSFloat Market Trade Offer #${trade.id} \n\nThanks for using CSFloat!`;
         }
     }
 
@@ -188,7 +398,9 @@ export class AutoFill extends FloatElement {
         if (tradeMessages.length > 0) {
             const sanitized = (tradeMessages[0] as HTMLElement).innerText.trim().replace(/ /g, '').toLowerCase();
 
-            return sanitized.includes('csgofloat') || sanitized.includes('floatmarket');
+            return (
+                sanitized.includes('csgofloat') || sanitized.includes('floatmarket') || sanitized.includes('csfloat')
+            );
         }
 
         return false;

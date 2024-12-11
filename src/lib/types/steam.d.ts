@@ -35,6 +35,11 @@ export interface WalletInfo {
     wallet_currency: number;
 }
 
+export interface rgInternalDescription {
+    type: string;
+    value: string;
+}
+
 // rgDescriptions
 export interface rgDescription {
     appid: AppId;
@@ -42,10 +47,7 @@ export interface rgDescription {
     background_color: string;
     classid: string;
     commodity: number;
-    descriptions: {
-        type: string;
-        value: string;
-    }[];
+    descriptions: rgInternalDescription[];
     fraudwarnings?: string[];
     icon_url: string;
     icon_url_large: string;
@@ -122,6 +124,7 @@ export interface CInventory {
     m_owner?: mOwner;
     owner?: mOwner;
     selectedItem?: InventoryAsset;
+    appid?: number;
 }
 
 export interface CAjaxPagingControls {
@@ -154,7 +157,7 @@ export interface CInventory {
         ShowInventoryLoadError: () => void;
         RetryLoad: () => any;
 
-        // Annotated by CSGOFloat, see {@link fallback.ts}
+        // Annotated by CSFloat, see {@link fallback.ts}
         g_ShowInventoryLoadError: () => void;
         g_AddInventoryData: (data: any) => void;
         g_GetInventoryLoadURL: () => string;
@@ -182,6 +185,7 @@ export interface UserSomeone {
     };
     strSteamId: string;
     findAsset: (appId: AppId, contextId: ContextId, itemId: string) => rgAsset;
+    ReloadInventory: (appId: AppId, contextId: ContextId) => void;
 }
 
 export interface CurrentTradeAsset {
@@ -215,16 +219,18 @@ export interface TradeInventory {
     success: boolean;
 }
 
+export type SteamAssets = {
+    [appId in AppId]: {
+        [contextId in ContextId]: {[assetId: string]: rgAsset};
+    };
+};
+
 // Declares globals available in the Steam Page Context
 declare global {
     const $J: typeof $;
     const g_rgListingInfo: {[listingId: string]: ListingData};
     const g_rgWalletInfo: WalletInfo | undefined; // Not populated when user is signed-out
-    const g_rgAssets: {
-        [appId in AppId]: {
-            [contextId in ContextId]: {[assetId: string]: rgAsset};
-        };
-    };
+    const g_rgAssets: SteamAssets;
     const g_ActiveInventory: CInventory | undefined; // Only populated on Steam inventory pages
     const g_steamID: string;
     const g_oSearchResults: CAjaxPagingControls;
@@ -245,6 +251,15 @@ declare global {
     ) => void; // Only populated on create offer pages
     const MoveItemToTrade: (el: HTMLElement) => void; // Only populated on create offer pages
     const g_rgCurrentTradeStatus: CurrentTradeStatus;
+    const ShowItemInventory: (appID: AppId, contextID: ContextId, AssetID?: number) => void;
+    const CreateItemHoverFromContainer: (
+        g_rgAssets: SteamAssets,
+        elementId: string,
+        appid: AppId,
+        contextid: string,
+        id: string,
+        amount: number
+    ) => void;
 }
 
 export {};

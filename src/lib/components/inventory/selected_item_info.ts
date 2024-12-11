@@ -1,15 +1,24 @@
 import {FloatElement} from '../custom';
 import {CustomElement, InjectAfter, InjectionMode} from '../injectors';
-import {html, css, TemplateResult, HTMLTemplateResult, nothing} from 'lit';
+import {html, css, TemplateResult, HTMLTemplateResult} from 'lit';
 import {state} from 'lit/decorators.js';
 import {InventoryAsset} from '../../types/steam';
 import {gFloatFetcher} from '../../services/float_fetcher';
 import {ItemInfo} from '../../bridge/handlers/fetch_inspect_info';
-import {formatSeed, getFadePercentage, isSkin, renderClickableRank, floor} from '../../utils/skin';
+import {
+    formatSeed,
+    getFadePercentage,
+    isSkin,
+    renderClickableRank,
+    floor,
+    isCharm,
+    isSellableOnCSFloat,
+} from '../../utils/skin';
 import {Observe} from '../../utils/observers';
 import {FetchStallResponse} from '../../bridge/handlers/fetch_stall';
 import {gStallFetcher} from '../../services/stall_fetcher';
 import {Contract} from '../../types/float_market';
+import '../common/ui/floatbar';
 
 /**
  * Why do we bind to iteminfo0 AND iteminfo1?
@@ -78,7 +87,7 @@ export class SelectedItemInfo extends FloatElement {
             return;
         }
 
-        return (this.stall.listings || []).find((e) => e.item.asset_id === this.asset?.assetid);
+        return (this.stall.data || []).find((e) => e.item.asset_id === this.asset?.assetid);
     }
 
     protected render(): HTMLTemplateResult {
@@ -86,19 +95,55 @@ export class SelectedItemInfo extends FloatElement {
             return html`<div>Loading...</div>`;
         }
 
-        if (!this.itemInfo) {
+        if (!this.asset?.description) {
             return html``;
         }
 
-        const fadePercentage = this.asset && getFadePercentage(this.asset.description, this.itemInfo);
+        const containerChildren: TemplateResult[] = [];
+
+        if (isSkin(this.asset.description) && this.itemInfo) {
+            containerChildren.push(this.renderFloatBar());
+            containerChildren.push(
+                html`<div>Float: ${this.itemInfo.floatvalue.toFixed(14)} ${renderClickableRank(this.itemInfo)}</div>`
+            );
+
+            containerChildren.push(html`<div>Paint Seed: ${formatSeed(this.itemInfo)}</div>`);
+
+            const fadePercentage = getFadePercentage(this.asset.description, this.itemInfo);
+            if (fadePercentage !== undefined) {
+                containerChildren.push(html`<div>Fade: ${floor(fadePercentage, 5)}%</div>`);
+            }
+        } else if (isCharm(this.asset.description) && this.itemInfo) {
+            containerChildren.push(
+                html`<div>
+                    Pattern: #${this.itemInfo.keychains?.length > 0 ? this.itemInfo.keychains[0].pattern : 'Unknown'}
+                </div>`
+            );
+        }
+
+        if (isSellableOnCSFloat(this.asset.description)) {
+            containerChildren.push(html`${this.renderListOnCSFloat()} ${this.renderFloatMarketListing()}`);
+        }
+
+        if (containerChildren.length === 0) {
+            return html``;
+        }
+
+        return html` <div class="container">${containerChildren}</div> `;
+    }
+
+    renderFloatBar(): TemplateResult<1> {
+        if (!this.itemInfo || !this.itemInfo.floatvalue) {
+            return html``;
+        }
 
         return html`
-            <div class="container">
-                <div>Float: ${this.itemInfo.floatvalue.toFixed(14)} ${renderClickableRank(this.itemInfo)}</div>
-                <div>Paint Seed: ${formatSeed(this.itemInfo)}</div>
-                ${fadePercentage !== undefined ? html`<div>Fade: ${floor(fadePercentage, 5)}%</div>` : nothing}
-                ${this.renderListOnCSGOFloat()} ${this.renderFloatMarketListing()}
-            </div>
+            <csfloat-float-bar
+                float=${this.itemInfo.floatvalue}
+                minFloat=${this.itemInfo.min}
+                maxFloat=${this.itemInfo.max}
+            >
+            </csfloat-float-bar>
         `;
     }
 
@@ -109,8 +154,8 @@ export class SelectedItemInfo extends FloatElement {
 
         return html`
             <div class="market-btn-container">
-                <a class="market-btn" href="https://csgofloat.com/item/${this.stallListing.id}" target="_blank">
-                    <img src="https://csgofloat.com/assets/full_logo.png" height="21" style="margin-right: 5px;" />
+                <a class="market-btn" href="https://csfloat.com/item/${this.stallListing.id}" target="_blank">
+                    <img src="https://csfloat.com/assets/n_full_logo.png" height="21" style="margin-right: 5px;" />
                     <span>
                         Listed for
                         <b>$${(this.stallListing.price / 100).toFixed(2)}</b>
@@ -120,7 +165,7 @@ export class SelectedItemInfo extends FloatElement {
         `;
     }
 
-    renderListOnCSGOFloat(): TemplateResult<1> {
+    renderListOnCSFloat(): TemplateResult<1> {
         if (this.stallListing) {
             // Don't tell them to list it if it's already listed...
             return html``;
@@ -133,9 +178,9 @@ export class SelectedItemInfo extends FloatElement {
 
         return html`
             <div class="market-btn-container">
-                <a class="market-btn" href="https://csgofloat.com" target="_blank">
+                <a class="market-btn" href="https://csfloat.com/sell" target="_blank">
                     <span>List on </span>
-                    <img src="https://csgofloat.com/assets/full_logo.png" height="21" style="margin-left: 5px;" />
+                    <img src="https://csfloat.com/assets/n_full_logo.png" height="21" style="margin-left: 5px;" />
                 </a>
             </div>
         `;
@@ -147,21 +192,19 @@ export class SelectedItemInfo extends FloatElement {
 
         if (!this.asset) return;
 
-        if (!isSkin(this.asset.description)) return;
+        // Guarantees a re-render for items without inspect links
+        this.loading = true;
 
-        // Commodities won't have inspect links
-        if (!this.inspectLink) return;
-
-        try {
-            this.loading = true;
-            this.itemInfo = await gFloatFetcher.fetch({
-                link: this.inspectLink,
-            });
-        } catch (e: any) {
-            console.error(`Failed to fetch float for ${this.asset.assetid}: ${e.toString()}`);
-        } finally {
-            this.loading = false;
+        if (this.inspectLink && (isSkin(this.asset.description) || isCharm(this.asset.description))) {
+            try {
+                this.itemInfo = await gFloatFetcher.fetch({
+                    link: this.inspectLink,
+                });
+            } catch (e: any) {
+                console.error(`Failed to fetch float for ${this.asset.assetid}: ${e.toString()}`);
+            }
         }
+        this.loading = false;
     }
 
     connectedCallback() {
@@ -182,6 +225,12 @@ export class SelectedItemInfo extends FloatElement {
             gStallFetcher
                 .fetch({steam_id64: g_ActiveInventory?.m_owner.strSteamId})
                 .then((stall) => (this.stall = stall));
+        }
+
+        // Make sure the parent container can overflow
+        const parentContainer = this.closest<HTMLElement>('.item_desc_content');
+        if (parentContainer) {
+            parentContainer.style.overflow = 'visible';
         }
     }
 }

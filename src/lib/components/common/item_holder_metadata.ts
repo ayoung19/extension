@@ -4,7 +4,7 @@ import {state} from 'lit/decorators.js';
 import {rgAsset} from '../../types/steam';
 import {gFloatFetcher} from '../../services/float_fetcher';
 import {ItemInfo} from '../../bridge/handlers/fetch_inspect_info';
-import {formatFloatWithRank, formatSeed, getFadePercentage, getLowestRank} from '../../utils/skin';
+import {formatFloatWithRank, formatSeed, getFadePercentage, getLowestRank, isCharm} from '../../utils/skin';
 import {isSkin, floor} from '../../utils/skin';
 import {getRankColour} from '../../utils/ranks';
 import {Observe} from '../../utils/observers';
@@ -35,7 +35,7 @@ export abstract class ItemHolderMetadata extends FloatElement {
                 -webkit-text-fill-color: transparent;
             }
 
-            .csgofloat-shine-fade-text {
+            .csfloat-shine-fade-text {
                 font-weight: 1000;
                 -webkit-text-stroke: 1px black;
             }
@@ -67,29 +67,41 @@ export abstract class ItemHolderMetadata extends FloatElement {
     }
 
     protected render(): HTMLTemplateResult {
-        if (!this.itemInfo) return html``;
+        if (!this.itemInfo || !this.asset) return html``;
 
-        const fadePercentage = this.asset && getFadePercentage(this.asset, this.itemInfo);
+        if (isSkin(this.asset)) {
+            const fadePercentage = this.asset && getFadePercentage(this.asset, this.itemInfo);
 
-        if (fadePercentage === 100) {
-            $J(this).parent().addClass('full-fade-border');
+            if (fadePercentage === 100) {
+                $J(this).parent().addClass('full-fade-border');
+            }
+
+            const rank = getLowestRank(this.itemInfo);
+
+            return html`
+                <span>
+                    <span class="float">${formatFloatWithRank(this.itemInfo, 6)}</span>
+                    <span class="seed"
+                        >${formatSeed(this.itemInfo)}
+                        ${fadePercentage !== undefined
+                            ? html`<span class="fade ${rank && rank <= 5 ? 'csfloat-shine-fade-text' : ''}"
+                                  >(${floor(fadePercentage, 1)}%)</span
+                              >`
+                            : nothing}</span
+                    >
+                </span>
+            `;
+        } else if (isCharm(this.asset)) {
+            return html`
+                <span>
+                    <span class="seed"
+                        >#${this.itemInfo.keychains?.length > 0 ? this.itemInfo.keychains[0].pattern : 'NA'}</span
+                    >
+                </span>
+            `;
+        } else {
+            return html``;
         }
-
-        const rank = getLowestRank(this.itemInfo);
-
-        return html`
-            <span>
-                <span class="float">${formatFloatWithRank(this.itemInfo, 6)}</span>
-                <span class="seed"
-                    >${formatSeed(this.itemInfo)}
-                    ${fadePercentage !== undefined
-                        ? html`<span class="fade ${rank && rank <= 5 ? 'csgofloat-shine-fade-text' : ''}"
-                              >(${floor(fadePercentage, 1)}%)</span
-                          >`
-                        : nothing}</span
-                >
-            </span>
-        `;
     }
 
     async connectedCallback() {
@@ -114,7 +126,7 @@ export abstract class ItemHolderMetadata extends FloatElement {
     async onInit() {
         if (!this.asset) return;
 
-        if (!isSkin(this.asset)) return;
+        if (!isSkin(this.asset) && !isCharm(this.asset)) return;
 
         // Commodities won't have inspect links
         if (!this.inspectLink) return;
@@ -141,6 +153,6 @@ export abstract class ItemHolderMetadata extends FloatElement {
         // Make the inventory box coloured ;)
         $J(this).parent().css('color', 'black');
         $J(this).parent().find('img').css('background-color', getRankColour(rank));
-        $J(this).parent().addClass('csgofloat-shine');
+        $J(this).parent().addClass('csfloat-shine');
     }
 }

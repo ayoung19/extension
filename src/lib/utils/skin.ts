@@ -84,7 +84,7 @@ function getFloatDbLink(info: ItemInfo, order: OrderType): string {
         }
     }
 
-    return `https://csgofloat.com/db?defIndex=${info.defindex}&paintIndex=${
+    return `https://csfloat.com/db?defIndex=${info.defindex}&paintIndex=${
         info.paintindex
     }&order=${order}&category=${getFloatDbCategory(info)}`;
 }
@@ -104,12 +104,48 @@ export function renderClickableRank(info: ItemInfo): TemplateResult<1> {
     </a>`;
 }
 
+export function isSellableOnCSFloat(asset: rgAsset): boolean {
+    return isSkin(asset) || isCharm(asset) || isAgent(asset) || isSticker(asset) || isPatch(asset) || isCase(asset);
+}
+
 export function isSkin(asset: rgAsset): boolean {
     return asset.tags
         ? asset.tags.some((a) => a.category === 'Weapon' || (a.category === 'Type' && a.internal_name === 'Type_Hands'))
         : ['★', 'Factory New', 'Minimal Wear', 'Field-Tested', 'Well-Worn', 'Battle-Scarred'].some((keyword) =>
               asset.market_hash_name.includes(keyword)
           );
+}
+
+export function isCharm(asset: rgAsset): boolean {
+    return isAbstractType(asset, 'Charm', 'CSGO_Type_Charm');
+}
+
+export function isAgent(asset: rgAsset): boolean {
+    return isAbstractType(asset, 'Agent', 'Type_CustomPlayer');
+}
+
+export function isSticker(asset: rgAsset): boolean {
+    return isAbstractType(asset, 'Sticker', 'CSGO_Tool_Sticker');
+}
+
+export function isPatch(asset: rgAsset): boolean {
+    return isAbstractType(asset, 'Patch', 'CSGO_Type_Patch');
+}
+
+export function isCase(asset: rgAsset): boolean {
+    return isAbstractType(asset, 'Container', 'CSGO_Type_WeaponCase');
+}
+
+function isAbstractType(asset: rgAsset, type: string, internalName: string): boolean {
+    if (asset.type.endsWith(type)) {
+        return true;
+    }
+
+    if (!asset.tags) {
+        return false;
+    }
+
+    return asset.tags.some((e) => e.category === 'Type' && e.internal_name === internalName);
 }
 
 export function getFadeCalculatorAndSupportedWeapon(

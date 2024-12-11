@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
-    "name": "CSGOFloat Market Checker",
-    "short_name": "CSGOFloat",
-    "version": "3.1.0",
-    "description": "Dedicated API for fetching the float value, paint seed, and screenshots of CS:GO items on the Steam Market or Inventories",
+    "name": "CSFloat Market Checker",
+    "short_name": "CSFloat",
+    "version": "5.2.0",
+    "description": "Shows the float value, paint seed, and more of Counter-Strike (CS:GO & CS2) items on the Steam Market or Inventories",
     "icons": {
         "16": "icons/16.png",
         "48": "icons/48.png",
@@ -33,26 +33,46 @@
             "matches": ["*://*.steamcommunity.com/tradeoffer/*"],
             "js": ["src/lib/page_scripts/trade_offer.js"],
             "css": ["src/global.css"]
+        },
+        {
+            "matches": ["*://*.steamcommunity.com/*/tradeoffers/*"],
+            "js": ["src/lib/page_scripts/trade_offers.js"],
+            "css": ["src/global.css"]
+        },
+        {
+            "matches": ["*://*.steamcommunity.com/id/*", "*://*.steamcommunity.com/profiles/*"],
+            "js": ["src/lib/page_scripts/profile.js"],
+            "css": ["src/global.css"]
         }
     ],
     "background": {
         "service_worker": "src/background.js",
         "type": "module"
     },
-    "permissions": ["storage", "scripting"],
+    "permissions": ["storage", "scripting", "alarms", "declarativeNetRequestWithHostAccess"],
     "host_permissions": [
         "*://*.steamcommunity.com/market/listings/730/*",
         "*://*.steamcommunity.com/id/*/inventory*",
         "*://*.steamcommunity.com/id/*/tradehistory*",
         "*://*.steamcommunity.com/profiles/*/inventory*"
     ],
+    "optional_host_permissions": ["*://*.steampowered.com/*"],
     "externally_connectable": {
-        "matches": ["*://*.steamcommunity.com/*"]
+        "matches": ["*://*.steamcommunity.com/*", "*://*.csfloat.com/*"]
     },
     "web_accessible_resources": [
         {
-            "resources": ["src/model_frame.html", "src/model_frame.js"],
-            "matches": ["https://steamcommunity.com/*"]
+            "resources": ["src/version.txt"],
+            "matches": ["https://csfloat.com/*"]
         }
-    ]
+    ],
+    "declarative_net_request": {
+        "rule_resources": [
+            {
+                "id": "steamcommunity_ruleset",
+                "enabled": true,
+                "path": "src/steamcommunity_ruleset.json"
+            }
+        ]
+    }
 }
